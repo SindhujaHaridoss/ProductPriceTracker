@@ -1,0 +1,34 @@
+[
+  {
+    "productUrl": "https://example.com/product1",
+    "currentPrice": 199.99
+  },
+  {
+    "productUrl": "https://example.com/product2",
+    "currentPrice": 89.49
+  },
+  {
+    "productUrl": "https://example.com/product3",
+    "currentPrice": 299.00
+  },
+  {
+    "productUrl": "https://example.com/product4",
+    "currentPrice": 49.99
+  },
+  {
+    "productUrl": "https://example.com/product5",
+    "currentPrice": 139.99
+  },
+  {
+    "productUrl": "https://example.com/product6",
+    "currentPrice": 299.00
+  },
+  {
+    "productUrl": "https://example.com/product7",
+    "currentPrice": 49.99
+  },
+  {
+    "productUrl": "https://example.com/product8",
+    "currentPrice": 139.99
+  }
+]
