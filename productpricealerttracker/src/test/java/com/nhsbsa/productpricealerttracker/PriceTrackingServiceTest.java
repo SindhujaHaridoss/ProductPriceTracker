@@ -3,11 +3,8 @@ package com.nhsbsa.productpricealerttracker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -21,8 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import com.nhsbsa.productpricealerttracker.controller.PriceTrackingController;
 import com.nhsbsa.productpricealerttracker.entity.UserPriceTracker;
@@ -32,6 +28,7 @@ import com.nhsbsa.productpricealerttracker.model.PriceTrackingResponse;
 import com.nhsbsa.productpricealerttracker.model.ProductPrice;
 import com.nhsbsa.productpricealerttracker.notificationservice.EmailNotificationService;
 import com.nhsbsa.productpricealerttracker.repository.PriceTrackingRepository;
+import com.nhsbsa.productpricealerttracker.scheduler.PriceCheckScheduler;
 import com.nhsbsa.productpricealerttracker.service.PriceTrackingService;
 import com.nhsbsa.productpricealerttracker.util.PriceAlertUtil;
 
@@ -53,7 +50,11 @@ class PriceTrackingServiceTest {
     private PriceTrackingController priceTrackingController;
 
     private PriceTrackingRequest request;
+   
 
+
+    @Autowired
+    private PriceCheckScheduler priceCheckScheduler;
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
@@ -65,15 +66,15 @@ class PriceTrackingServiceTest {
         request.setDesiredPrice(100.00);
         request.setEmailId("abc@gmail.com");
         request.setCheckFrequency(Frequency.MORNING_ONLY);
+        priceCheckScheduler = new PriceCheckScheduler(priceTrackingRepository, priceAlertUtil);
+        
     }
 
 
 @Test
     void testTrackUserProductPrice_NewRecord() {
-        // Arrange
         PriceTrackingRequest request = new PriceTrackingRequest("testuser", "https://example.com/product1", 100.00, Frequency.MORNING_ONLY, "abc@sdf.com");
         ProductPrice productPrice = new ProductPrice("https://example.com/product1", 90.00);
-        UserPriceTracker newUserPriceTracker = new UserPriceTracker(null, "testuser", "https://example.com/product1", 100.00, Frequency.MORNING_ONLY, false, "testuser@example.com", 0.00);
         
         when(priceAlertUtil.getProductPrices()).thenReturn(List.of(productPrice));
         when(priceTrackingRepository.findByUserNameAndProductUrl("testuser", "https://example.com/product1")).thenReturn(Collections.emptyList());
@@ -135,7 +136,6 @@ class PriceTrackingServiceTest {
 
     @Test
     void testTrackUserProductPrice_NewUser_ShouldCallCreateAndSendAlert() {
-        // Arrange
         PriceTrackingRequest createAndSendAlertrequest = new PriceTrackingRequest();
         createAndSendAlertrequest.setUserName("testuser");
         createAndSendAlertrequest.setProductUrl("https://example.com/product1");
@@ -149,14 +149,48 @@ class PriceTrackingServiceTest {
                 "Mocked response", true, "testuser", "https://example.com/product1", 95.0, 100.0);
         when(priceAlertUtil.createProductPriceAndSendAlert(any(PriceTrackingRequest.class))).thenReturn(mockResponse);
 
-        // Act
         PriceTrackingResponse response = priceTrackingService.trackUserProductPrice(createAndSendAlertrequest);
 
-        // Assert
         assertNotNull(response);
         assertEquals("Mocked response", response.getMessage());
         verify(priceAlertUtil, times(1)).createProductPriceAndSendAlert(any(PriceTrackingRequest.class));
     }
 
+    @Test
+    void testProcessMorningAlertRequests_shouldProcessOnlyUnsentAlerts() {
+        UserPriceTracker tracker1 = new UserPriceTracker(1L, "user1", "url1", 100.0, Frequency.MORNING_ONLY, false, "test@example.com", 0.0);
+        UserPriceTracker tracker2 = new UserPriceTracker(2L, "user2", "url2", 120.0, Frequency.MORNING_ONLY, true, "test2@example.com", 0.0);
 
+        List<UserPriceTracker> mockList = Arrays.asList(tracker1, tracker2);
+
+        when(priceTrackingRepository.findByCheckFrequency(Frequency.MORNING_ONLY)).thenReturn(mockList);
+
+        priceCheckScheduler.processMorningAlertRequests();
+
+        verify(priceAlertUtil, times(1)).processProductPriceAndSendAlert(tracker1);
+        verify(priceAlertUtil, never()).processProductPriceAndSendAlert(tracker2);
+    }
+
+    @Test
+    void testProcess24HoursAlertRequests_shouldProcessUnsentAlerts() {
+        UserPriceTracker trackerRecord = new UserPriceTracker(4L, "user4", "http://example.com/product", 150.0, Frequency.MIDNIGHT_ONLY, false, "24@example.com", 0.0);
+
+        when(priceTrackingRepository.findByCheckFrequency(Frequency.MIDNIGHT_ONLY))
+                .thenReturn(Collections.singletonList(trackerRecord));
+
+        priceCheckScheduler.process24hoursAlertRequests();
+
+        verify(priceAlertUtil, times(1)).processProductPriceAndSendAlert(trackerRecord);
+    }
+    @Test
+    void testProcessMidnightAlertRequests_shouldProcessUnsentAlerts() {
+        UserPriceTracker trackerRecord = new UserPriceTracker(3L, "user3", "http://example.com/product1", 90.0, Frequency.MIDNIGHT_ONLY, false, "mid@example.com", 0.0);
+
+        when(priceTrackingRepository.findByCheckFrequency(Frequency.MIDNIGHT_ONLY))
+                .thenReturn(Collections.singletonList(trackerRecord));
+
+        priceCheckScheduler.processMidnightAlertRequests();
+
+        verify(priceAlertUtil, times(1)).processProductPriceAndSendAlert(trackerRecord);
+    }
 }
